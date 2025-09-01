@@ -1,0 +1,58 @@
+name: Build
+
+on:
+  push:
+    branches: [ master ]
+    paths-ignore:
+      - '**.md'
+      - '.github/**'
+      - '!.github/workflows/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    if: ${{ !startsWith(github.event.head_commit.message, '[skip ci]') }}
+
+    strategy:
+      matrix:
+        abi: [ aarch64-linux-android, x86_64-linux-android ]
+
+    name: Build (${{ matrix.abi }})
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-
+
+      - name: Prepare environment
+        run: |
+          rustup target add ${{ matrix.abi }}
+          cargo install --force cargo-make || true
+      - name: Build with cargo
+        id: release
+        env:
+          TARGET_ABI: ${{ matrix.abi }}
+          UPX_COMPRESS: 1
+        run: |
+          cargo make upx-release
+          echo name="DexHunter-$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[0].version').r$(git rev-list --count HEAD).$(git rev-parse --short HEAD) (${{ matrix.abi }})" >> $GITHUB_OUTPUT
+      - name: Upload artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.release.outputs.name }}
+          path: ./target/${{ matrix.abi }}/release/dexhunter
